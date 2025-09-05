@@ -16,19 +16,16 @@ from storage import Storage
 
 class Builder:
 
-    def __init__(self, api_key="", limit=50):
+	def __init__(self, api_key="", limit=50):
 
-        self.crawler = Crawler()
+	    self.crawler = Crawler(api=api_key, limit=limit)
 
-        self.crawler.api = api_key
+	    self.chunker = Chunker()
 
-        self.crawler.limit = limit
+	    self.embedder = Embedder()
+	    
+	    self.storage = Storage()
 
-        self.chunker = Chunker()
-
-        self.embedder = Embedder()
-
-        self.storage = Storage()
 
     def build_base(self, url, index_path="index.faiss", chunks_path="chunks.pkl"):
 

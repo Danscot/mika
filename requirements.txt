@@ -1,1 +1,12 @@
+fastapi
+uvicorn
+langchain
+beautifulsoup4
+tiktoken
+sentence-transformers
+faiss-cpu
+mistralai
+requests
 firecrawl
+langchain_community
+openai
