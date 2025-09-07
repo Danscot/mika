@@ -34,7 +34,7 @@ class Builder:
 
         print("✂️ Chunking text...")
 
-        chunks = self.chunker.chunk_doc(docs)
+        chunks = self.chunker.chunk_docs(docs)
 
         print("🧮 Embedding chunks...")
 
