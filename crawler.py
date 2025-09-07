@@ -1,36 +1,41 @@
 """
 This module is there to crawl websites using Firecrawl
 """
-
-from firecrawl import FirecrawlApp
+from firecrawl import Firecrawl
+from firecrawl.types import ScrapeOptions
 
 
 class Crawler:
-    def __init__(self, api_key="", limit=100):
+    def __init__(self):
 
-        self.api = api_key
+        self.limit = 2
 
-        self.limit = limit
-        
-        self.client = FirecrawlApp(api_key=self.api)
+        self.client = Firecrawl(api_key='fc-46954301e4ff46e3a6bcc3bf3aafc320')
 
     def crawler_job(self, url):
+
         try:
-            result = self.client.crawl_url(
+
+            result = self.client.crawl(
+
                 url,
-                params={
-                    "limit": self.limit,
-                    "formats": ["markdown"]
-                }
+                
+                limit = self.limit,
+
+				scrape_options=ScrapeOptions(formats=['markdown']),
+
+				poll_interval=30
             )
 
-            if not result or "data" not in result:
-                print(f"⚠️ No crawl results from {url}")
-                return []
+			# Extract the markdown text into a list of documents
 
-            # Extract markdown docs
-            return [doc["markdown"] for doc in result["data"] if "markdown" in doc]
+			docs = [doc.markdown for doc in crawl_status.data if hasattr(doc, "markdown")]
+
+			return docs
 
         except Exception as e:
+
             print(f"❌ Error crawling {url}: {e}")
+
             return []
+
