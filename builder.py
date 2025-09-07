@@ -55,5 +55,7 @@ class Builder:
 
 
 if __name__ == "__main__":
-    builder = Builder(api_key="fc-46954301e4ff46e3a6bcc3bf3aafc320")
+
+    builder = Builder()
+
     builder.build_base("https://baileys.wiki/docs/intro/")

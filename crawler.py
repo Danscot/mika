@@ -6,9 +6,10 @@ from firecrawl.types import ScrapeOptions
 
 
 class Crawler:
+
     def __init__(self):
 
-        self.limit = 2
+        self.limit = 100
 
         self.client = Firecrawl(api_key='fc-46954301e4ff46e3a6bcc3bf3aafc320')
 
