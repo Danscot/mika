@@ -1,4 +1,5 @@
 
+import faiss
 """
 Purpose: create or update FAISS index.
 """
@@ -17,7 +18,7 @@ class Indexer:
     def append_to_index(self, new_embeddings):
 
         self.index.add(new_embeddings)
-        
+
         return self.index
 
 
