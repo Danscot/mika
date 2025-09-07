@@ -1,4 +1,6 @@
 import faiss
+
+import pickle
 """
 Purpose: save/load FAISS index and chunks.
 """
