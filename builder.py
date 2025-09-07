@@ -40,11 +40,14 @@ class Builder:
 
         embeddings = self.embedder.embed(chunks)
 
-        print("📦 Building FAISS index...")
+         # ✅ Fix here: get embedding dimension
+        dim = embeddings.shape[1]
 
-        indexer = Indexer(embeddings)
+        print(f"📦 Building FAISS index with dim={dim}...")
 
-        index = indexer.build_index()
+        indexer = Indexer(dim)
+        
+        index = indexer.build_index(embeddings)
 
         print("💾 Saving index + chunks...")
         self.storage.save_index(index, index_path)
