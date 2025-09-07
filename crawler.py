@@ -29,7 +29,7 @@ class Crawler:
 
 			# Extract the markdown text into a list of documents
 
-			docs = [doc.markdown for doc in crawl_status.data if hasattr(doc, "markdown")]
+            docs = [doc.markdown for doc in crawl_status.data if hasattr(doc, "markdown")]
 
 			return docs
 
