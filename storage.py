@@ -1,4 +1,4 @@
-
+import faiss
 """
 Purpose: save/load FAISS index and chunks.
 """
