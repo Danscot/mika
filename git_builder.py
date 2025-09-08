@@ -91,4 +91,4 @@ if __name__ == "__main__":
     # Example: Index Baileys repo and append to existing knowledge
 	builder = GitHubBuilder(git)
 
-    builder.build_base(append=True)
+	builder.build_base(append=True)
