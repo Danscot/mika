@@ -11,4 +11,5 @@ firecrawl
 langchain_community
 openai
 GitPython
+python-telegram-bot
 
