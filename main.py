@@ -59,8 +59,10 @@ class Main:
 
 		ans = self.brain.ask(prompt)
 
-		print("\n" + ans)
+		#print("\n" + ans)
 
 		self.memory.add_conversation(self.question, ans)
+
+		return ans
 
 
