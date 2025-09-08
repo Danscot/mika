@@ -19,6 +19,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
+    print(text)
+
     main = Main()
 
     ans = main.query(text)
