@@ -19,14 +19,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     text = update.message.text
 
-    # Get or create Mika session for this user
     if user_id not in sessions:
         sessions[user_id] = Main(user_id=user_id)
-
     main = sessions[user_id]
 
-    ans = main.query(text)
-    await update.message.reply_text(ans)
+    response = main.query(text)  # now returns {"text": ..., "code": ...}
+
+    # Send explanation first
+    if response["text"]:
+        await update.message.reply_text(response["text"])
+
+    # Send code separately in preformatted block
+    if response["code"]:
+        await update.message.reply_text(f'```{response["code"]}```', parse_mode="Markdown")
+
 
 if __name__ == "__main__":
 
