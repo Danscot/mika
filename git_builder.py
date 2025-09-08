@@ -86,9 +86,9 @@ class GitHubBuilder:
 
 if __name__ == "__main__":
 
-	git = input("enter the github page link: ")
+	git_repo = input("enter the github page link: ")
 
     # Example: Index Baileys repo and append to existing knowledge
-	builder = GitHubBuilder(git)
+	builder = GitHubBuilder(git_repo)
 
 	builder.build_base(append=True)

@@ -10,3 +10,5 @@ requests
 firecrawl
 langchain_community
 openai
+GitPython
+
