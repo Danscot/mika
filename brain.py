@@ -1,6 +1,5 @@
 from openai import OpenAI
 
-
 class Brain:
 
 	def __init__(self):
