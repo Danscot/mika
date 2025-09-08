@@ -22,13 +22,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get or create Mika session for this user
     if user_id not in sessions:
         sessions[user_id] = Main(user_id=user_id)
-        
+
     main = sessions[user_id]
 
     ans = main.query(text)
     await update.message.reply_text(ans)
 
 if __name__ == "__main__":
+
+    
+    print("Telegram bot running")
 
     app = ApplicationBuilder().token("8398340834:AAHdL0e76S86St0rl3R8jXCnqdWA5s_LNps").build()
 
@@ -38,4 +41,3 @@ if __name__ == "__main__":
 
     app.run_polling()
 
-    print("Telegram bot running")

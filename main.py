@@ -25,9 +25,9 @@ class Main:
 
 		self.memory = Memory(user_id=user_id)
 
-	def query(self):
+	def query(self, q):
 
-		self.question = input("\nWelcome, you can talk with Mika: ")
+		self.question = q
 
 		context = self.rag.query(self.question)
 
