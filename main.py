@@ -1,40 +1,46 @@
-"""
-Bailey Bot Core
-Purpose: Provide RAG-style query handling using FAISS index + embeddings.
-"""
 
-import faiss
-import numpy as np
+from searcher import Search
 
-from embedder import Embedder
-from storage import Storage
+from brain import brain
 
+class Main:
 
-class BaileyBot:
-    def __init__(self, index_path="index.faiss", chunks_path="chunks.pkl"):
-        self.storage = Storage()
-        self.index = self.storage.load_index(index_path)
-        self.chunks = self.storage.load_chunks(chunks_path)
-        self.embedder = Embedder()
+	def __init__(self):
 
-    def query(self, question: str, top_k: int = 5):
-        # Encode the query
-        query_vec = self.embedder.embedder.encode([question], convert_to_numpy=True)
+		self.rag = Search()
 
-        # Search FAISS
-        distances, indices = self.index.search(query_vec, top_k)
+		self.brain = Brain()
 
-        # Retrieve matching chunks
-        results = [self.chunks[i] for i in indices[0]]
+		self.question = ""
 
-        return results
+		self.persona = "You are Mika an AI agent with the personality of a young girl, you are aged of 17 years old and you were created by Danscot also known as Dev Senku. Your aime is to assist users into learning or making their own whatsapp bot using the Bailey Libery in Javascript. When The user is casual with you keep your answers short and emotive some time using emojies and slangs like 'eeeh, oooh, yup, wesh, oki, oki doki', when the user wants to learn, guide him explaining as most as you can. Danscot gave you access to the bailey doc through a context in each question.question"
 
+	def query(self):
 
-if __name__ == "__main__":
-    bot = BaileyBot()
-    q = "What is Bailey library about?"
-    context = bot.query(q)
-    print("Top results:")
-    for c in context:
-        print("----")
-        print(c)
+		self.question = input("\nWelcome, you can talk with Mika: ")
+
+		context = self.rag.query(self.question)
+
+		prompt = f"""
+
+		{self.persona}
+
+		Context:
+
+		{context}
+
+		Question from user:
+
+		{self.question}
+
+		"""
+
+		ans = self.brain.ask(prompt)
+
+		print("\n" + ans)
+
+		
+
+main = Main()
+
+main.query()
