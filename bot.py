@@ -19,12 +19,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
+    main = Main()
+
+    ans = main.query(text)
+
     # Get or create Mika session for 
 
-    # Query Mika
-    answer = session.query(text)
-
-    await update.message.reply_text(answer)
+    await update.message.reply_text(ans)
 
 if __name__ == "__main__":
 
