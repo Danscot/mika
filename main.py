@@ -64,9 +64,3 @@ class Main:
 		self.memory.add_conversation(self.question, ans)
 
 
-
-main = Main()
-
-while True:	
-
-	main.query()
