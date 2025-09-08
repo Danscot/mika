@@ -39,8 +39,10 @@ class Main:
 
 		print("\n" + ans)
 
-		
+
 
 main = Main()
 
-main.query()
+while True:	
+
+	main.query()
