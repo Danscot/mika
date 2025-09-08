@@ -1,7 +1,7 @@
 
 from searcher import Search
 
-from brain import brain
+from brain import Brain
 
 class Main:
 
