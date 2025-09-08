@@ -15,7 +15,7 @@ class Main:
 
 		self.brain = Brain()
 
-		with open(persona_file, "r", encoding="utf-8") as f:
+		with open('persona.json', "r", encoding="utf-8") as f:
 
 		    data = json.load(f)
 
