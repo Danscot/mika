@@ -12,21 +12,19 @@ from main import Main
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("Hello world")
+    
+sessions = {}  # keep this at the top of your bot.py
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     user_id = str(update.message.from_user.id)
-
     text = update.message.text
 
-    print(text)
-
-    main = Main()
+    # Get or create Mika session for this user
+    if user_id not in sessions:
+        sessions[user_id] = Main(user_id=user_id)
+    main = sessions[user_id]
 
     ans = main.query(text)
-
-    # Get or create Mika session for 
-
     await update.message.reply_text(ans)
 
 if __name__ == "__main__":
