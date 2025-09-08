@@ -9,7 +9,7 @@ import json
 
 class Main:
 
-	def __init__(self):
+	def __init__(self, user_id=None):
 
 		self.rag = Search()
 
@@ -23,7 +23,7 @@ class Main:
 
 		self.question = ""
 
-		self.memory = Memory(user_id="OO7")
+		self.memory = Memory(user_id=user_id)
 
 	def query(self):
 
