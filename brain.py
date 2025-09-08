@@ -18,23 +18,27 @@ class Brain:
 
 		self.model = "mistralai/mistral-small-3.1-24b-instruct:free"
 
-	def ask(self, question):
+	def ask(self, prompt):
 
-		completion = self.client.chat.completions.create(
+        completion = self.client.chat.completions.create(
 
-		  model=self.model,
+            model=self.model,
 
-		  messages=[
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-		    {
-		      "role": "user",
+        answer = completion.choices[0].message.content
 
-		      "content": question
-		    }
-		  ]
-		)
+        # Try to split code from explanation
+        if "```" in answer:
 
-		answer = completion.choices[0].message.content
+            parts = answer.split("```")
 
-		return answer
+            explanation = parts[0].strip()
+
+            code = parts[1].replace("javascript", "").strip() if len(parts) > 1 else ""
+
+            return {"text": explanation, "code": code}
+            
+        return {"text": answer, "code": ""}
 
