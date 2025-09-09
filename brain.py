@@ -2,23 +2,23 @@ from openai import OpenAI
 
 class Brain:
 
-	def __init__(self):
+    def __init__(self):
 
-		self.base_url = "https://openrouter.ai/api/v1"
+        self.base_url = "https://openrouter.ai/api/v1"
 
-		self.api_key = input("\nYour api key: ")
+        self.api_key = input("\nYour api key: ")
 
-		self.client = OpenAI(
+        self.client = OpenAI(
 
-			base_url = self.base_url,
+            base_url = self.base_url,
 
-			api_key = self.api_key
+            api_key = self.api_key
 
-		)
+        )
 
-		self.model = "mistralai/mistral-small-3.1-24b-instruct:free"
+        self.model = "mistralai/mistral-small-3.1-24b-instruct:free"
 
-	def ask(self, prompt):
+    def ask(self, prompt):
 
         completion = self.client.chat.completions.create(
 
