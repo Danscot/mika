@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+WORKDIR /usr/src/app
+
+RUN useradd -m appuser
+
+USER appuser
+
+# Install system dependencies (for FAISS, numpy, etc.)
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV TELEGRAM=""
+
+ENV AI=""
+
+ENV PYTHONUNBUFFERED=1
+
+CMD [ "python", "./bot.py" ]

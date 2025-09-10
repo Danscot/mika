@@ -1,12 +1,14 @@
 from openai import OpenAI
 
+import os
+
 class Brain:
 
     def __init__(self):
 
         self.base_url = "https://openrouter.ai/api/v1"
 
-        self.api_key = input("\nYour api key: ")
+        self.api_key = os.getenv("AI")
 
         self.client = OpenAI(
 

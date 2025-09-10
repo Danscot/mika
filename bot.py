@@ -9,6 +9,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 from main import Main
 
+import os
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("Hello world")
@@ -39,7 +41,9 @@ if __name__ == "__main__":
 
     print("Telegram bot running....")
 
-    app = ApplicationBuilder().token("8398340834:AAHdL0e76S86St0rl3R8jXCnqdWA5s_LNps").build()
+    key = os.getenv("TELEGRAM")
+
+    app = ApplicationBuilder().token(key).build()
 
     app.add_handler(CommandHandler("start", start))
 
