@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /usr/src/app
 
-# Install system dependencies (for FAISS, numpy, etc.)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
@@ -11,12 +11,17 @@ RUN apt-get update && apt-get install -y \
 
 # Create a non-root user
 RUN useradd -m appuser
+
+# Copy files first
+COPY . .
+
+# Change ownership so appuser can write to this folder
+RUN chown -R appuser:appuser /usr/src/app
+
 USER appuser
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
 
 ENV TELEGRAM=""
 ENV AI=""
