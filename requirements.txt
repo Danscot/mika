@@ -1,5 +1,3 @@
-fastapi
-uvicorn
 langchain
 beautifulsoup4
 tiktoken
