@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mika · Knowledge Ingestion</title>
+  {% load static %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'ingestion/css/main.css' %}">
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ── Top bar ─────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <span class="brand-mark">M</span>
+      <div>
+        <span class="brand-name">MIKA</span>
+        <span class="brand-sub">KNOWLEDGE INGESTION</span>
+      </div>
+    </div>
+    <span class="status-pill" id="status-pill">● READY</span>
+  </header>
+
+  <!-- ── Main layout ─────────────────────────────────────────── -->
+  <main class="workspace">
+
+    <!-- Left: form panel -->
+    <section class="form-panel" aria-label="Ingestion configuration">
+
+      <!-- Source type -->
+      <div class="field-block">
+        <p class="block-label">Data source</p>
+        <div class="tab-row" role="tablist" aria-label="Source type">
+          <button class="tab active" role="tab" data-tab="url"    aria-selected="true">⬡ URL</button>
+          <button class="tab"        role="tab" data-tab="github" aria-selected="false">⎇ GitHub</button>
+          <button class="tab"        role="tab" data-tab="pdf"    aria-selected="false">⊡ PDF</button>
+        </div>
+      </div>
+
+      <!-- URL pane -->
+      <div class="source-pane active" id="pane-url">
+        <div class="field-block">
+          <label class="field-label" for="url-input">Target URL</label>
+          <input class="field-input" id="url-input" type="url"
+            placeholder="https://docs.example.com/intro" autocomplete="off" />
+        </div>
+        <div class="field-block">
+          <label class="field-label" for="crawl-limit">Crawl limit (pages)</label>
+          <input class="field-input narrow" id="crawl-limit" type="number"
+            value="50" min="1" max="500" />
+        </div>
+      </div>
+
+      <!-- GitHub pane -->
+      <div class="source-pane" id="pane-github">
+        <div class="field-block">
+          <label class="field-label" for="gh-url">Repository URL</label>
+          <input class="field-input" id="gh-url" type="url"
+            placeholder="https://github.com/user/repo" autocomplete="off" />
+        </div>
+        <div class="field-block">
+          <p class="field-label">Index file types</p>
+          <div class="chip-row" id="ext-chips">
+            <button class="chip on" data-ext=".py">.py</button>
+            <button class="chip on" data-ext=".js">.js</button>
+            <button class="chip on" data-ext=".ts">.ts</button>
+            <button class="chip on" data-ext=".md">.md</button>
+            <button class="chip"    data-ext=".rs">.rs</button>
+            <button class="chip"    data-ext=".go">.go</button>
+            <button class="chip"    data-ext=".json">.json</button>
+            <button class="chip"    data-ext=".yaml">.yaml</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PDF pane -->
+      <div class="source-pane" id="pane-pdf">
+        <div class="field-block">
+          <p class="field-label">PDF file</p>
+          <label class="upload-zone" id="upload-zone" for="pdf-file-input">
+            <input type="file" id="pdf-file-input" accept=".pdf" hidden />
+            <span class="upload-icon">⊡</span>
+            <span class="upload-text">Drop a PDF or click to browse</span>
+            <span class="upload-hint">Text-layer PDFs only · max 50 MB</span>
+            <span class="upload-name" id="upload-name"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <hr class="divider" />
+
+      <!-- Index name -->
+      <div class="field-block">
+        <label class="field-label" for="index-name">Index name</label>
+        <input class="field-input" id="index-name" type="text"
+          placeholder="default" value="default" autocomplete="off" />
+        <p class="field-hint">Saved as <code>&lt;name&gt;.faiss</code> + <code>&lt;name&gt;.pkl</code></p>
+      </div>
+
+      <!-- Existing indexes datalist -->
+      <datalist id="existing-indexes"></datalist>
+
+      <!-- Mode toggle -->
+      <div class="field-block">
+        <p class="block-label">Index mode</p>
+        <div class="mode-toggle" role="group" aria-label="Index mode">
+          <button class="mode-btn active" id="mode-new"    data-mode="new">✦ New index</button>
+          <button class="mode-btn"        id="mode-append" data-mode="append">⊕ Append</button>
+        </div>
+        <p class="mode-hint" id="mode-hint">
+          Creates a fresh index. Any existing file with this name will be replaced.
+        </p>
+      </div>
+
+      <!-- Run button -->
+      <button class="run-btn" id="run-btn">▶ RUN INGESTION</button>
+
+    </section>
+
+    <!-- Right: log panel -->
+    <section class="log-panel" aria-label="Ingestion log">
+      <div class="log-topbar">
+        <span class="log-title">INGESTION LOG</span>
+        <div class="log-actions">
+          <button class="log-btn" id="btn-clear">clear</button>
+          <button class="log-btn" id="btn-copy">copy</button>
+        </div>
+      </div>
+
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="log-body" id="log-body" aria-live="polite" aria-relevant="additions">
+        <div class="log-line">
+          <span class="log-ts">--:--:--</span>
+          <span class="log-msg system">mika ingestion engine ready<span class="cursor"></span></span>
+        </div>
+        <div class="log-line">
+          <span class="log-ts">--:--:--</span>
+          <span class="log-msg system">configure a source and press RUN INGESTION</span>
+        </div>
+      </div>
+
+      <div class="stat-bar">
+        <div class="stat-cell">
+          <span class="stat-val" id="stat-chunks">—</span>
+          <span class="stat-key">CHUNKS</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-val" id="stat-vectors">—</span>
+          <span class="stat-key">VECTORS</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-val" id="stat-time">—</span>
+          <span class="stat-key">ELAPSED</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="{% static 'ingestion/js/main.js' %}"></script>
+</body>
+</html>

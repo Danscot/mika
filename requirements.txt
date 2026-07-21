@@ -1,13 +1,12 @@
-langchain
-beautifulsoup4
-tiktoken
+# Django
+django
+
+# RAG dependencies (same as your existing project)
 sentence-transformers
 faiss-cpu
-mistralai
-requests
-firecrawl
-langchain_community
-openai
-GitPython
-python-telegram-bot
+firecrawl-py
+gitpython
+pymupdf          # PDF text extraction (imported as fitz)
 
+# Optional: production server
+gunicorn
