@@ -103,6 +103,25 @@ def _extract_text(file_path: str) -> str:
 
 # ── Shared index builder ──────────────────────────────────────────────────────
 
+def _normalize_chunks(chunks: list) -> list[dict]:
+    """
+    Normalize any mix of bare strings and dicts into uniform
+    {"text": str, "source": str} dicts.
+
+    Indexes built before the dict-chunk migration store plain strings.
+    Mixing old strings + new dicts in the same pkl causes subtle bugs
+    (KeyError on retrieval, inaccurate source attribution). This function
+    makes both formats safe to merge.
+    """
+    out = []
+    for c in chunks:
+        if isinstance(c, dict) and "text" in c:
+            out.append(c)
+        else:
+            out.append({"text": str(c), "source": ""})
+    return out
+
+
 def _build_or_append(new_chunks: list[dict], index_name: str, append: bool) -> dict:
     """
     Given a list of chunk dicts {"text": ..., "source": ...},
@@ -117,10 +136,16 @@ def _build_or_append(new_chunks: list[dict], index_name: str, append: bool) -> d
     from storage  import Storage
 
     if not new_chunks:
-        raise ValueError("No text content found in the uploaded file.")
+        raise ValueError(
+            "No chunks were produced from the source. "
+            "The content may be empty, all-whitespace, or the file/URL returned no usable text."
+        )
 
     embedder = Embedder()
     storage  = Storage()
+
+    # Ensure new chunks are always dicts (defensive normalisation)
+    new_chunks = _normalize_chunks(new_chunks)
 
     # Extract text strings for embedding (embedder expects list[str])
     texts          = [c["text"] for c in new_chunks]
@@ -132,12 +157,20 @@ def _build_or_append(new_chunks: list[dict], index_name: str, append: bool) -> d
         logger.info("Appending to existing index '%s'", index_name)
         old_index = faiss.read_index(index_path)
         with open(chunks_path, "rb") as f:
-            old_chunks = pickle.load(f)
+            raw_old = pickle.load(f)
+
+        # ← KEY FIX: normalize old chunks so string + dict mixing never happens
+        old_chunks = _normalize_chunks(raw_old)
 
         indexer = Indexer(old_index.d)
         indexer.index = old_index
         merged_index  = indexer.append_to_index(new_embeddings)
         merged_chunks = old_chunks + new_chunks
+
+        logger.info(
+            "Merged %d old + %d new = %d total chunks",
+            len(old_chunks), len(new_chunks), len(merged_chunks),
+        )
     else:
         logger.info("Building new index '%s'", index_name)
         dim           = new_embeddings.shape[1]
@@ -147,6 +180,11 @@ def _build_or_append(new_chunks: list[dict], index_name: str, append: bool) -> d
 
     storage.save_index(merged_index, index_path)
     storage.save_chunks(merged_chunks, chunks_path)
+
+    # Explicitly bump the mtime on the .faiss file so that any running bot
+    # process detects the change via its mtime-based hot-reload and picks up
+    # the new data without needing a server restart.
+    Path(index_path).touch()
 
     logger.info(
         "Index '%s': %d chunks, %d vectors",
@@ -221,15 +259,28 @@ def ingest_github(repo_url: str, index_name: str, append: bool,
     from chunker      import Chunker
     from git_builder  import GitHubBuilder
 
-    repo_slug = repo_url.rstrip("/").split("/")[-1]
+    # Strip trailing .git and slashes so the cache dir name is stable
+    # e.g. https://github.com/user/repo.git → repo
+    clean_url = repo_url.rstrip("/")
+    repo_slug = clean_url.split("/")[-1].removesuffix(".git")
     repo_dir  = str(settings.INDEX_DIR / f"_repo_{repo_slug}")
 
     builder = GitHubBuilder(repo_url=repo_url, repo_dir=repo_dir)
-    if extensions:
-        original_load   = builder.load_files
-        builder.load_files = lambda: original_load(exts=extensions)
 
-    raw_docs   = builder.load_files()
+    # clone_repo() must be called before load_files() so the directory exists
+    builder.clone_repo()
+
+    exts     = extensions or [".py", ".js", ".ts", ".md"]
+    raw_docs = builder.load_files(exts=exts)
+
+    if not raw_docs:
+        tried = ", ".join(sorted(set(exts)))
+        raise ValueError(
+            f"No files with extensions [{tried}] found in repo '{repo_slug}'. "
+            f"Check that the repo contains files with those extensions, "
+            f"or select different extensions in the UI."
+        )
+
     chunker    = Chunker()
     new_chunks = chunker.chunk_docs(raw_docs, source=repo_url)
 

@@ -11,21 +11,39 @@ class Search:
     RAG Search class using FAISS + embedded chunks.
 
     Uses L2 (Euclidean) distance — LOWER distance means MORE similar.
-    The default threshold of 1.5 is appropriate for all-MiniLM-L6-v2:
-      • Very similar chunks:   ~0.0 – 0.5
-      • Loosely related:       ~0.5 – 1.5
-      • Unrelated:             > 1.5
+    Threshold guide for all-MiniLM-L6-v2:
+      • Very similar:   ~0.0 – 0.5
+      • Related:        ~0.5 – 1.8
+      • Unrelated:      > 1.8
 
-    The old default of 0.8 was too strict, silently dropping all results
-    and causing the AI to say "I don't know" even after ingestion.
+    Chunks can be stored as plain strings (legacy) or dicts {"text":..., "source":...}.
+    Both formats are handled transparently.
     """
 
-    def __init__(self, index_path="index.faiss", chunks_path="chunks.pkl", threshold=1.5):
+    def __init__(self, index_path="index.faiss", chunks_path="chunks.pkl", threshold=1.8):
         self.storage   = Storage()
         self.index     = self.storage.load_index(index_path)
-        self.chunks    = self.storage.load_chunks(chunks_path)
+        self.chunks    = self._normalize_chunks(self.storage.load_chunks(chunks_path))
         self.embedder  = Embedder()
         self.threshold = threshold
+
+    # ── internal helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_chunks(chunks: list) -> list[dict]:
+        """
+        Normalize any mix of bare strings and dicts into uniform dicts.
+        This handles indexes built before the dict-chunk migration.
+        """
+        normalized = []
+        for c in chunks:
+            if isinstance(c, dict) and "text" in c:
+                normalized.append(c)
+            else:
+                normalized.append({"text": str(c), "source": ""})
+        return normalized
+
+    # ── public API ────────────────────────────────────────────────────────────
 
     def query(self, question: str, top_k: int = 5) -> str:
         """
@@ -40,25 +58,25 @@ class Search:
         distances, indices = self.index.search(query_vec, top_k)
 
         logger.debug(
-            "RAG distances for %r: %s", question, list(zip(distances[0], indices[0]))
+            "RAG distances for %r: %s",
+            question,
+            [(round(float(d), 3), int(i)) for d, i in zip(distances[0], indices[0])],
         )
 
         results = []
         for dist, i in zip(distances[0], indices[0]):
-            if i == -1:          # FAISS returns -1 for empty slots
+            if i == -1:
                 continue
             if dist <= self.threshold:
-                chunk = self.chunks[i]
-                text  = chunk["text"] if isinstance(chunk, dict) and "text" in chunk else str(chunk)
-                results.append(text)
+                results.append(self.chunks[i]["text"])
 
         if not results:
+            best = float(distances[0][0]) if len(distances[0]) else -1
             logger.warning(
-                "RAG returned 0 chunks for %r (best distance=%.3f, threshold=%.3f). "
-                "Consider raising the threshold or re-ingesting the data.",
-                question,
-                float(distances[0][0]) if len(distances[0]) else -1,
-                self.threshold,
+                "RAG: 0 chunks matched for %r  "
+                "(best L2=%.3f, threshold=%.3f). "
+                "Tip: raise threshold or re-ingest.",
+                question, best, self.threshold,
             )
 
         return "\n\n".join(results)

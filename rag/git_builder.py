@@ -1,94 +1,95 @@
-'''
-this builder is to be able to update the index.faiss directly with data from github
-'''
+"""
+git_builder.py
+--------------
+Clone/pull a GitHub repo and collect its source files as text.
+The actual FAISS indexing is handled by services.py (_build_or_append).
+"""
 
 import os
+import logging
 import git
-import pickle
-import faiss
-from embedder import Embedder
-from indexer import Indexer
-from storage import Storage
+
+logger = logging.getLogger(__name__)
 
 
 class GitHubBuilder:
-    def __init__(self, repo_url, repo_dir="repo_cache"):
+
+    DEFAULT_EXTS = [".py", ".js", ".ts", ".md", ".txt", ".java", ".cpp",
+                    ".c", ".h", ".cs", ".rb", ".go", ".rs", ".json", ".yaml",
+                    ".yml", ".toml", ".sh", ".html", ".css"]
+
+    def __init__(self, repo_url: str, repo_dir: str = "repo_cache"):
         self.repo_url = repo_url
         self.repo_dir = repo_dir
-        self.embedder = Embedder()
-        self.storage = Storage()
+        # NOTE: Embedder/Storage intentionally NOT instantiated here.
+        # All indexing is now handled by services._build_or_append.
 
     def clone_repo(self):
+        """Clone the repo if it doesn't exist locally, otherwise pull latest."""
         if not os.path.exists(self.repo_dir):
-            print(f"📥 Cloning {self.repo_url}...")
+            logger.info("Cloning %s → %s", self.repo_url, self.repo_dir)
             git.Repo.clone_from(self.repo_url, self.repo_dir)
         else:
-            print("🔄 Repo already exists, pulling latest...")
-            repo = git.Repo(self.repo_dir)
-            repo.remotes.origin.pull()
+            logger.info("Repo cache exists at %s — pulling latest", self.repo_dir)
+            try:
+                repo = git.Repo(self.repo_dir)
+                repo.remotes.origin.pull()
+            except Exception as exc:
+                logger.warning("Git pull failed (%s) — continuing with cached copy", exc)
 
-    def load_files(self, exts=[".py", ".js", ".ts", ".md"]):
-        """Collect code/docs files into text chunks"""
-        print("📂 Collecting files...")
-        chunks = []
-        for root, _, files in os.walk(self.repo_dir):
-            for file in files:
-                if any(file.endswith(ext) for ext in exts):
-                    path = os.path.join(root, file)
-                    try:
-                        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                            chunks.append(f"FILE: {file}\n{content}")
-                    except Exception as e:
-                        print(f"⚠️ Could not read {file}: {e}")
-        return chunks
+    def load_files(self, exts: list[str] | None = None) -> list[str]:
+        """
+        Walk self.repo_dir and return a list of file-content strings for
+        every file whose extension is in `exts`.
 
-    def build_base(
-        self,
-        index_path="index.faiss",
-        chunks_path="chunks.pkl",
-        append=False,
-    ):
-        """Build or extend FAISS index with a GitHub repo"""
-        self.clone_repo()
-        chunks = self.load_files()
+        Each entry is formatted as:
+            "FILE: relative/path/to/file.py\\n<file content>"
 
-        print("🧮 Embedding repo files...")
-        embeddings = self.embedder.embed(chunks)
+        Returns an empty list if no matching files are found (caller should
+        check and raise a meaningful error rather than silently producing an
+        empty index).
+        """
+        if not os.path.isdir(self.repo_dir):
+            raise FileNotFoundError(
+                f"Repo directory '{self.repo_dir}' does not exist. "
+                "Make sure clone_repo() was called first."
+            )
 
-        # If append mode and index already exists
-        if append and os.path.exists(index_path) and os.path.exists(chunks_path):
-            print("➕ Appending to existing index...")
-            index = faiss.read_index(index_path)
+        target_exts = set(exts or self.DEFAULT_EXTS)
+        docs: list[str] = []
+        skipped = 0
 
-            # Just use Indexer.append_to_index
-            indexer = Indexer(index.d)
-            indexer.index = index
-            index = indexer.append_to_index(embeddings)
+        for root, dirs, files in os.walk(self.repo_dir):
+            # Skip hidden dirs (.git, .github, __pycache__, node_modules, …)
+            dirs[:] = [
+                d for d in dirs
+                if not d.startswith(".") and d not in ("node_modules", "__pycache__", "dist", "build")
+            ]
 
-            # Merge old + new chunks
-            with open(chunks_path, "rb") as f:
-                old_chunks = pickle.load(f)
-            chunks = old_chunks + chunks
+            for filename in files:
+                _, ext = os.path.splitext(filename)
+                if ext.lower() not in target_exts:
+                    continue
 
-        else:
-            print("📦 Building new FAISS index...")
-            dim = embeddings.shape[1]
-            indexer = Indexer(dim)
-            index = indexer.build_index(embeddings)
+                abs_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(abs_path, self.repo_dir)
 
-        print("💾 Saving index + chunks...")
-        self.storage.save_index(index, index_path)
-        self.storage.save_chunks(chunks, chunks_path)
+                try:
+                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
 
-        print("✅ GitHub repo indexed successfully!")
+                    if not content.strip():
+                        skipped += 1
+                        continue
 
+                    docs.append(f"FILE: {rel_path}\n{content}")
 
-if __name__ == "__main__":
+                except Exception as exc:
+                    logger.warning("Could not read %s: %s", rel_path, exc)
 
-	git_repo = input("enter the github page link: ")
+        logger.info(
+            "load_files: found %d non-empty files (skipped %d empty), extensions=%s, dir=%s",
+            len(docs), skipped, sorted(target_exts), self.repo_dir,
+        )
 
-    # Example: Index Baileys repo and append to existing knowledge
-	builder = GitHubBuilder(git_repo)
-
-	builder.build_base(append=True)
+        return docs
