@@ -38,7 +38,7 @@
         <div class="tab-row" role="tablist" aria-label="Source type">
           <button class="tab active" role="tab" data-tab="url"    aria-selected="true">⬡ URL</button>
           <button class="tab"        role="tab" data-tab="github" aria-selected="false">⎇ GitHub</button>
-          <button class="tab"        role="tab" data-tab="pdf"    aria-selected="false">⊡ PDF</button>
+          <button class="tab"        role="tab" data-tab="pdf"    aria-selected="false">⊡ File</button>
         </div>
       </div>
 
@@ -78,15 +78,16 @@
         </div>
       </div>
 
-      <!-- PDF pane -->
+      <!-- File pane (PDF / MD / DOCX) -->
       <div class="source-pane" id="pane-pdf">
         <div class="field-block">
-          <p class="field-label">PDF file</p>
+          <p class="field-label">Document file</p>
           <label class="upload-zone" id="upload-zone" for="pdf-file-input">
-            <input type="file" id="pdf-file-input" accept=".pdf" hidden />
+            <input type="file" id="pdf-file-input"
+                   accept=".pdf,.md,.markdown,.docx,.doc" hidden />
             <span class="upload-icon">⊡</span>
-            <span class="upload-text">Drop a PDF or click to browse</span>
-            <span class="upload-hint">Text-layer PDFs only · max 50 MB</span>
+            <span class="upload-text">Drop a file or click to browse</span>
+            <span class="upload-hint">PDF · Markdown (.md) · Word (.docx) · max 50 MB</span>
             <span class="upload-name" id="upload-name"></span>
           </label>
         </div>

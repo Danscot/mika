@@ -3,10 +3,19 @@
 // ── State ─────────────────────────────────────────────────────────────────────
 let activeSource = "url";
 let activeMode   = "new";
-let pdfFile      = null;
+let uploadedFile = null;   // renamed from pdfFile — now accepts PDF/MD/DOCX
 let isRunning    = false;
 let startTime    = null;
 let logText      = [];
+
+const ACCEPTED_EXTENSIONS = [".pdf", ".md", ".markdown", ".docx", ".doc"];
+const ACCEPTED_MIME_TYPES = [
+  "application/pdf",
+  "text/markdown",
+  "text/x-markdown",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+];
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const statusPill   = document.getElementById("status-pill");
@@ -53,22 +62,37 @@ function setMode(m) {
     : "New data is merged into the existing index. Previous knowledge is preserved.";
 }
 
-// ── PDF upload ─────────────────────────────────────────────────────────────────
+// ── File upload (PDF / MD / DOCX) ─────────────────────────────────────────────
+
+function isAcceptedFile(file) {
+  const ext = "." + file.name.split(".").pop().toLowerCase();
+  return ACCEPTED_EXTENSIONS.includes(ext);
+}
+
+function setUploadedFile(file) {
+  if (!file) return;
+  if (!isAcceptedFile(file)) {
+    addLog(`Unsupported file type: ${file.name}. Please upload a PDF, Markdown, or DOCX file.`, "err");
+    return;
+  }
+  uploadedFile = file;
+  const ext = "." + file.name.split(".").pop().toUpperCase();
+  uploadName.textContent = `⊡ ${file.name}`;
+}
+
+// Update the file input to accept all supported types
+pdfInput.setAttribute("accept", ACCEPTED_EXTENSIONS.join(","));
+
 pdfInput.addEventListener("change", () => {
-  pdfFile = pdfInput.files[0] || null;
-  uploadName.textContent = pdfFile ? "⊡ " + pdfFile.name : "";
+  setUploadedFile(pdfInput.files[0] || null);
 });
 
-uploadZone.addEventListener("dragover", e => { e.preventDefault(); uploadZone.classList.add("dragover"); });
+uploadZone.addEventListener("dragover",  e => { e.preventDefault(); uploadZone.classList.add("dragover"); });
 uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragover"));
 uploadZone.addEventListener("drop", e => {
   e.preventDefault();
   uploadZone.classList.remove("dragover");
-  const f = e.dataTransfer.files[0];
-  if (f && f.name.toLowerCase().endsWith(".pdf")) {
-    pdfFile = f;
-    uploadName.textContent = "⊡ " + f.name;
-  }
+  setUploadedFile(e.dataTransfer.files[0] || null);
 });
 
 // ── Log helpers ───────────────────────────────────────────────────────────────
@@ -137,8 +161,7 @@ async function loadIndexes() {
     const res  = await fetch("/api/indexes/");
     const data = await res.json();
     const dl   = document.getElementById("existing-indexes");
-    dl.innerHTML = data.indexes.map(n => `<option value="${escHtml(n)}">`).join("");
-    // Wire up input
+    dl.innerHTML = data.indexes.map(n => `<option value="${escHtml(n)}"`).join("");
     document.getElementById("index-name").setAttribute("list", "existing-indexes");
   } catch (_) {}
 }
@@ -154,9 +177,8 @@ function consumeSSE(response) {
     if (done) { finishRun(); return; }
     buf += decoder.decode(value, { stream: true });
 
-    // Parse SSE frames (split on double newline)
     const frames = buf.split("\n\n");
-    buf = frames.pop(); // Keep incomplete frame
+    buf = frames.pop();
 
     for (const frame of frames) {
       const eventMatch = frame.match(/^event: (.+)/m);
@@ -182,8 +204,6 @@ function consumeSSE(response) {
 function handleSSEEvent(event, data) {
   if (event === "log") {
     addLog(data.msg, data.level || "info");
-
-    // Move progress bar forward as stages appear
     const stageProgress = { warn: 20, ok: 60 };
     if (data.level in stageProgress) {
       const cur = parseFloat(progressFill.style.width) || 0;
@@ -198,7 +218,7 @@ function handleSSEEvent(event, data) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + "s";
     setStats(data.chunks, data.vectors, elapsed);
     finishRun(false);
-    loadIndexes(); // Refresh autocomplete
+    loadIndexes();
   }
 
   if (event === "error") {
@@ -226,15 +246,13 @@ runBtn.addEventListener("click", () => {
   setStats("—", "—", "—");
   addSep();
 
-  if (activeSource === "url")    runUrl(indexName, append);
+  if (activeSource === "url")        runUrl(indexName, append);
   else if (activeSource === "github") runGitHub(indexName, append);
-  else if (activeSource === "pdf")    runPdf(indexName, append);
+  else if (activeSource === "pdf")    runFile(indexName, append);
 });
 
 async function runUrl(indexName, append) {
-  const url   = document.getElementById("url-input").value.trim();
-  const limit = document.getElementById("crawl-limit").value || 50;
-
+  const url = document.getElementById("url-input").value.trim();
   if (!url) { addLog("No URL provided.", "err"); finishRun(true); return; }
 
   addLog(`Ingesting URL → ${url}`, "bold");
@@ -244,7 +262,7 @@ async function runUrl(indexName, append) {
     const res = await fetch("/api/ingest/url/", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrf() },
-      body: JSON.stringify({ url, index_name: indexName, append, crawl_limit: limit }),
+      body: JSON.stringify({ url, index_name: indexName, append }),
     });
     if (!res.ok) { const e = await res.json(); addLog(e.error, "err"); finishRun(true); return; }
     consumeSSE(res);
@@ -271,19 +289,25 @@ async function runGitHub(indexName, append) {
   } catch (err) { addLog(err.message, "err"); finishRun(true); }
 }
 
-async function runPdf(indexName, append) {
-  if (!pdfFile) { addLog("No PDF selected.", "err"); finishRun(true); return; }
+// Unified file upload handler (PDF + MD + DOCX)
+async function runFile(indexName, append) {
+  if (!uploadedFile) {
+    addLog("No file selected. Please upload a PDF, Markdown, or DOCX file.", "err");
+    finishRun(true);
+    return;
+  }
 
-  addLog(`Ingesting PDF → ${pdfFile.name}`, "bold");
+  const ext = "." + uploadedFile.name.split(".").pop().toUpperCase();
+  addLog(`Ingesting ${ext} file → ${uploadedFile.name}`, "bold");
   addLog(`Mode: ${append ? "append" : "new index"} · index: ${indexName}`, "info");
 
   const form = new FormData();
-  form.append("file",        pdfFile);
+  form.append("file",        uploadedFile);
   form.append("index_name",  indexName);
   form.append("append",      append ? "true" : "false");
 
   try {
-    const res = await fetch("/api/ingest/pdf/", {
+    const res = await fetch("/api/ingest/file/", {
       method: "POST",
       headers: { "X-CSRFToken": getCsrf() },
       body: form,
