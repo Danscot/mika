@@ -1,13 +1,20 @@
-langchain
-beautifulsoup4
-tiktoken
+# ── Django ────────────────────────────────────────────────────────────────────
+django
+python-dotenv
+
+# ── RAG dependencies ──────────────────────────────────────────────────────────
 sentence-transformers
 faiss-cpu
-mistralai
-requests
-firecrawl
-langchain_community
-openai
-GitPython
+firecrawl-py
+gitpython
+pymupdf          # PDF text extraction
+python-docx      # DOCX text extraction (.docx / .doc)
+
+# ── Gemini LLM ────────────────────────────────────────────────────────────────
+google-genai
+
+# ── Telegram bot ──────────────────────────────────────────────────────────────
 python-telegram-bot
 
+# ── Production server (optional) ──────────────────────────────────────────────
+gunicorn
