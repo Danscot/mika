@@ -42,9 +42,48 @@ def _resolve_rag_dir() -> Path:
         return Path(__file__).parent
 
 
+class MultiSearch:
+    """
+    Merges results from multiple Search instances.
+    Queries all indexes in parallel and returns the top-k unique chunks
+    sorted by relevance distance (lowest = best for L2).
+    """
+
+    def __init__(self, searchers: list):
+        self.searchers = searchers
+
+    def query(self, question: str, top_k: int = 5) -> str:
+        import concurrent.futures
+        all_results = []
+
+        def _query_one(s):
+            return s.query(question, top_k=top_k)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.searchers)) as pool:
+            futures = [pool.submit(_query_one, s) for s in self.searchers]
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    text = fut.result()
+                    if text:
+                        all_results.append(text)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning("MultiSearch error: %s", e)
+
+        return "\n\n---\n\n".join(all_results)
+
+
 class MainGemini:
 
-    def __init__(self, user_id: str = "default", index_name: str = "default"):
+    def __init__(self, user_id: str = "default",
+                 index_name: str | None = None,
+                 index_names: list[str] | None = None,
+                 system_prompt_override: str | None = None):
+        """
+        index_names  – list of index names to merge (preferred)
+        index_name   – single index name (legacy, kept for compatibility)
+        If both are given, index_names wins.
+        """
         # Make sure the RAG scripts are importable
         rag_dir = str(_resolve_rag_dir())
         if rag_dir not in sys.path:
@@ -54,25 +93,43 @@ class MainGemini:
         from brain_gemini import BrainGemini
 
         index_dir = _resolve_index_dir()
-        self._index_path  = str(index_dir / f"{index_name}.faiss")
-        self._chunks_path = str(index_dir / f"{index_name}.pkl")
 
-        if not Path(self._index_path).exists():
-            raise FileNotFoundError(
-                f"Index '{index_name}' not found at {self._index_path}. "
-                "Ingest some data first via the web UI."
-            )
+        # Resolve the list of indexes to search
+        if index_names:
+            self._index_names = index_names
+        elif index_name:
+            self._index_names = [index_name]
+        else:
+            self._index_names = ["default"]
+
+        # Validate all indexes exist
+        for name in self._index_names:
+            p = index_dir / f"{name}.faiss"
+            if not p.exists():
+                raise FileNotFoundError(
+                    f"Index '{name}' not found at {p}. "
+                    "Ingest some data first via the web UI."
+                )
+
+        # Primary index path (used for mtime hot-reload tracking)
+        self._index_path  = str(index_dir / f"{self._index_names[0]}.faiss")
+        self._chunks_path = str(index_dir / f"{self._index_names[0]}.pkl")
+        self._index_dir   = index_dir
 
         self.brain  = BrainGemini()
         self.memory = Memory(user_id=user_id)
 
         # Load persona
-        persona_path = Path(__file__).parent / "persona.json"
-        if persona_path.exists():
-            with open(persona_path, "r", encoding="utf-8") as f:
-                self.persona = json.load(f).get("persona", "")
+        # system_prompt_override lets bot_runner inject a per-bot prompt
+        if system_prompt_override:
+            self.persona = system_prompt_override
         else:
-            self.persona = "You are Mika, a helpful AI assistant."
+            persona_path = Path(__file__).parent / "persona.json"
+            if persona_path.exists():
+                with open(persona_path, "r", encoding="utf-8") as f:
+                    self.persona = json.load(f).get("persona", "")
+            else:
+                self.persona = "You are Mika, a helpful AI assistant."
 
         # Load the searcher for the first time
         self._rag_mtime: float = 0.0
@@ -82,13 +139,28 @@ class MainGemini:
     # ── RAG hot-reload ────────────────────────────────────────────────────────
 
     def _load_rag(self):
-        """(Re)load the Search instance from disk and record the index mtime."""
+        """
+        (Re)load Search instances from disk.
+        If multiple indexes are configured, a MultiSearch wrapper merges results.
+        """
         from searcher import Search
-        logger.info("Loading RAG index from %s", self._index_path)
-        self._rag = Search(
-            index_path=self._index_path,
-            chunks_path=self._chunks_path,
-        )
+
+        if len(self._index_names) == 1:
+            name = self._index_names[0]
+            logger.info("Loading RAG index: %s", name)
+            self._rag = Search(
+                index_path=str(self._index_dir / f"{name}.faiss"),
+                chunks_path=str(self._index_dir / f"{name}.pkl"),
+            )
+        else:
+            logger.info("Loading %d RAG indexes: %s", len(self._index_names), self._index_names)
+            self._rag = MultiSearch(
+                [Search(
+                    index_path=str(self._index_dir / f"{name}.faiss"),
+                    chunks_path=str(self._index_dir / f"{name}.pkl"),
+                ) for name in self._index_names]
+            )
+
         self._rag_mtime = Path(self._index_path).stat().st_mtime
 
     def _rag_is_stale(self) -> bool:

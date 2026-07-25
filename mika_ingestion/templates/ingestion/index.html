@@ -3,170 +3,338 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mika · Knowledge Ingestion</title>
+  <title>Mika · Dashboard</title>
   {% load static %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'ingestion/css/main.css' %}">
 </head>
 <body>
 
 <div class="shell">
 
-  <!-- ── Top bar ─────────────────────────────────────────────── -->
-  <header class="topbar">
-    <div class="topbar-brand">
+  <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
       <span class="brand-mark">M</span>
       <div>
         <span class="brand-name">MIKA</span>
-        <span class="brand-sub">KNOWLEDGE INGESTION</span>
+        <span class="brand-sub">RAG MANAGER</span>
       </div>
     </div>
-    <span class="status-pill" id="status-pill">● READY</span>
-  </header>
 
-  <!-- ── Main layout ─────────────────────────────────────────── -->
-  <main class="workspace">
+    <ul class="nav-list">
+      <li><button class="nav-item active" data-view="databases">
+        <span class="nav-icon">⬡</span><span>Databases</span>
+      </button></li>
+      <li><button class="nav-item" data-view="ingest">
+        <span class="nav-icon">⊕</span><span>Ingest</span>
+      </button></li>
+      <li><button class="nav-item" data-view="bots">
+        <span class="nav-icon">⎈</span><span>Bots</span>
+      </button></li>
+    </ul>
 
-    <!-- Left: form panel -->
-    <section class="form-panel" aria-label="Ingestion configuration">
+    <div class="sidebar-footer">
+      <span class="status-dot" id="global-status-dot"></span>
+      <span class="sidebar-status" id="global-status-text">Loading…</span>
+    </div>
+  </nav>
 
-      <!-- Source type -->
-      <div class="field-block">
-        <p class="block-label">Data source</p>
-        <div class="tab-row" role="tablist" aria-label="Source type">
-          <button class="tab active" role="tab" data-tab="url"    aria-selected="true">⬡ URL</button>
-          <button class="tab"        role="tab" data-tab="github" aria-selected="false">⎇ GitHub</button>
-          <button class="tab"        role="tab" data-tab="pdf"    aria-selected="false">⊡ File</button>
+  <!-- ── Main area ─────────────────────────────────────────────────────── -->
+  <div class="main">
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         VIEW: DATABASES
+    ══════════════════════════════════════════════════════════════════ -->
+    <div class="view active" id="view-databases">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Knowledge Databases</h1>
+          <p class="view-sub">All FAISS indexes — vectors, chunks, and sources</p>
+        </div>
+        <button class="btn-primary" id="db-refresh-btn">↺ Refresh</button>
+      </div>
+
+      <!-- Summary row -->
+      <div class="kpi-row" id="db-kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-val" id="kpi-total-dbs">—</span>
+          <span class="kpi-label">Databases</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-val" id="kpi-total-vectors">—</span>
+          <span class="kpi-label">Total vectors</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-val" id="kpi-total-chunks">—</span>
+          <span class="kpi-label">Total chunks</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-val" id="kpi-total-size">—</span>
+          <span class="kpi-label">Disk usage</span>
         </div>
       </div>
 
-      <!-- URL pane -->
-      <div class="source-pane active" id="pane-url">
-        <div class="field-block">
-          <label class="field-label" for="url-input">Target URL</label>
-          <input class="field-input" id="url-input" type="url"
-            placeholder="https://docs.example.com/intro" autocomplete="off" />
-        </div>
-        <div class="field-block">
-          <label class="field-label" for="crawl-limit">Crawl limit (pages)</label>
-          <input class="field-input narrow" id="crawl-limit" type="number"
-            value="50" min="1" max="500" />
+      <!-- DB cards grid -->
+      <div class="db-grid" id="db-grid">
+        <div class="empty-state" id="db-empty">
+          <span class="empty-icon">⬡</span>
+          <p>No databases yet.</p>
+          <p class="empty-hint">Go to <strong>Ingest</strong> to add your first knowledge source.</p>
         </div>
       </div>
+    </div>
 
-      <!-- GitHub pane -->
-      <div class="source-pane" id="pane-github">
-        <div class="field-block">
-          <label class="field-label" for="gh-url">Repository URL</label>
-          <input class="field-input" id="gh-url" type="url"
-            placeholder="https://github.com/user/repo" autocomplete="off" />
+    <!-- ══════════════════════════════════════════════════════════════════
+         VIEW: INGEST
+    ══════════════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-ingest">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Ingest Data</h1>
+          <p class="view-sub">Add knowledge from URLs, GitHub repos, or files</p>
         </div>
-        <div class="field-block">
-          <p class="field-label">Index file types</p>
-          <div class="chip-row" id="ext-chips">
-            <button class="chip on" data-ext=".py">.py</button>
-            <button class="chip on" data-ext=".js">.js</button>
-            <button class="chip on" data-ext=".ts">.ts</button>
-            <button class="chip on" data-ext=".md">.md</button>
-            <button class="chip"    data-ext=".rs">.rs</button>
-            <button class="chip"    data-ext=".go">.go</button>
-            <button class="chip"    data-ext=".json">.json</button>
-            <button class="chip"    data-ext=".yaml">.yaml</button>
+        <span class="status-pill" id="status-pill">● READY</span>
+      </div>
+
+      <div class="ingest-layout">
+        <!-- Left: config -->
+        <section class="form-panel">
+
+          <div class="field-block">
+            <p class="block-label">Data source</p>
+            <div class="tab-row" role="tablist">
+              <button class="tab active" data-tab="url">⬡ URL</button>
+              <button class="tab" data-tab="github">⎇ GitHub</button>
+              <button class="tab" data-tab="pdf">⊡ File</button>
+            </div>
           </div>
+
+          <!-- URL pane -->
+          <div class="source-pane active" id="pane-url">
+            <div class="field-block">
+              <label class="field-label" for="url-input">Target URL</label>
+              <input class="field-input" id="url-input" type="url"
+                placeholder="https://docs.example.com" autocomplete="off" />
+            </div>
+          </div>
+
+          <!-- GitHub pane -->
+          <div class="source-pane" id="pane-github">
+            <div class="field-block">
+              <label class="field-label" for="gh-url">Repository URL</label>
+              <input class="field-input" id="gh-url" type="url"
+                placeholder="https://github.com/user/repo" autocomplete="off" />
+            </div>
+            <div class="field-block">
+              <p class="field-label">File types to index</p>
+              <div class="chip-row" id="ext-chips">
+                <button class="chip on" data-ext=".py">.py</button>
+                <button class="chip on" data-ext=".js">.js</button>
+                <button class="chip on" data-ext=".ts">.ts</button>
+                <button class="chip on" data-ext=".md">.md</button>
+                <button class="chip" data-ext=".rs">.rs</button>
+                <button class="chip" data-ext=".go">.go</button>
+                <button class="chip" data-ext=".json">.json</button>
+                <button class="chip" data-ext=".yaml">.yaml</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- File pane -->
+          <div class="source-pane" id="pane-pdf">
+            <div class="field-block">
+              <label class="upload-zone" id="upload-zone" for="pdf-file-input">
+                <input type="file" id="pdf-file-input"
+                       accept=".pdf,.md,.markdown,.docx,.doc" hidden />
+                <span class="upload-icon">⊡</span>
+                <span class="upload-text">Drop a file or click to browse</span>
+                <span class="upload-hint">PDF · Markdown · Word (.docx) · max 50 MB</span>
+                <span class="upload-name" id="upload-name"></span>
+              </label>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
+          <div class="field-block">
+            <label class="field-label" for="index-name">Target database</label>
+            <input class="field-input" id="index-name" type="text"
+              placeholder="default" value="default" autocomplete="off" list="existing-indexes"/>
+            <datalist id="existing-indexes"></datalist>
+            <p class="field-hint">Saved as <code>&lt;name&gt;.faiss</code></p>
+          </div>
+
+          <div class="field-block">
+            <p class="block-label">Mode</p>
+            <div class="mode-toggle">
+              <button class="mode-btn active" id="mode-new">✦ New index</button>
+              <button class="mode-btn" id="mode-append">⊕ Append</button>
+            </div>
+            <p class="mode-hint" id="mode-hint">Creates a fresh index — replaces any existing file.</p>
+          </div>
+
+          <button class="run-btn" id="run-btn">▶ RUN INGESTION</button>
+        </section>
+
+        <!-- Right: log -->
+        <section class="log-panel">
+          <div class="log-topbar">
+            <span class="log-title">INGESTION LOG</span>
+            <div class="log-actions">
+              <button class="log-btn" id="btn-clear">clear</button>
+              <button class="log-btn" id="btn-copy">copy</button>
+            </div>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+          <div class="log-body" id="log-body" aria-live="polite">
+            <div class="log-line">
+              <span class="log-ts">--:--:--</span>
+              <span class="log-msg system">mika ingestion engine ready<span class="cursor"></span></span>
+            </div>
+          </div>
+          <div class="stat-bar">
+            <div class="stat-cell">
+              <span class="stat-val" id="stat-chunks">—</span>
+              <span class="stat-key">CHUNKS</span>
+            </div>
+            <div class="stat-cell">
+              <span class="stat-val" id="stat-vectors">—</span>
+              <span class="stat-key">VECTORS</span>
+            </div>
+            <div class="stat-cell">
+              <span class="stat-val" id="stat-time">—</span>
+              <span class="stat-key">ELAPSED</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         VIEW: BOTS
+    ══════════════════════════════════════════════════════════════════ -->
+    <div class="view" id="view-bots">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Bot Instances</h1>
+          <p class="view-sub">Configure Telegram bots and connect them to a knowledge database</p>
         </div>
+        <button class="btn-primary" id="open-bot-modal-btn">+ New Bot</button>
       </div>
 
-      <!-- File pane (PDF / MD / DOCX) -->
-      <div class="source-pane" id="pane-pdf">
-        <div class="field-block">
-          <p class="field-label">Document file</p>
-          <label class="upload-zone" id="upload-zone" for="pdf-file-input">
-            <input type="file" id="pdf-file-input"
-                   accept=".pdf,.md,.markdown,.docx,.doc" hidden />
-            <span class="upload-icon">⊡</span>
-            <span class="upload-text">Drop a file or click to browse</span>
-            <span class="upload-hint">PDF · Markdown (.md) · Word (.docx) · max 50 MB</span>
-            <span class="upload-name" id="upload-name"></span>
-          </label>
+      <div class="bot-grid" id="bot-grid">
+        <div class="empty-state" id="bot-empty">
+          <span class="empty-icon">⎈</span>
+          <p>No bots configured yet.</p>
+          <p class="empty-hint">Click <strong>New Bot</strong> to connect a Telegram bot to a knowledge base.</p>
         </div>
       </div>
+    </div>
 
-      <!-- Divider -->
-      <hr class="divider" />
+  </div><!-- /main -->
+</div><!-- /shell -->
 
-      <!-- Index name -->
+<!-- ══════════════════════════════════════════════════════════════════
+     MODAL: Bot create / edit
+══════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="bot-modal" hidden>
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">New Bot</span>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+
       <div class="field-block">
-        <label class="field-label" for="index-name">Index name</label>
-        <input class="field-input" id="index-name" type="text"
-          placeholder="default" value="default" autocomplete="off" />
-        <p class="field-hint">Saved as <code>&lt;name&gt;.faiss</code> + <code>&lt;name&gt;.pkl</code></p>
+        <label class="field-label" for="bot-name">Bot name</label>
+        <input class="field-input" id="bot-name" type="text" placeholder="Support Bot" />
       </div>
 
-      <!-- Existing indexes datalist -->
-      <datalist id="existing-indexes"></datalist>
-
-      <!-- Mode toggle -->
       <div class="field-block">
-        <p class="block-label">Index mode</p>
-        <div class="mode-toggle" role="group" aria-label="Index mode">
-          <button class="mode-btn active" id="mode-new"    data-mode="new">✦ New index</button>
-          <button class="mode-btn"        id="mode-append" data-mode="append">⊕ Append</button>
-        </div>
-        <p class="mode-hint" id="mode-hint">
-          Creates a fresh index. Any existing file with this name will be replaced.
-        </p>
+        <label class="field-label" for="bot-token">Telegram token</label>
+        <input class="field-input" id="bot-token" type="text"
+          placeholder="123456:ABC-DEF..." autocomplete="off" />
+        <p class="field-hint">Get this from <code>@BotFather</code> on Telegram</p>
       </div>
 
-      <!-- Run button -->
-      <button class="run-btn" id="run-btn">▶ RUN INGESTION</button>
-
-    </section>
-
-    <!-- Right: log panel -->
-    <section class="log-panel" aria-label="Ingestion log">
-      <div class="log-topbar">
-        <span class="log-title">INGESTION LOG</span>
-        <div class="log-actions">
-          <button class="log-btn" id="btn-clear">clear</button>
-          <button class="log-btn" id="btn-copy">copy</button>
-        </div>
+      <div class="field-block">
+        <label class="field-label" for="bot-index">Knowledge databases <span class="field-optional">(select one or more)</span></label>
+        <select class="field-input field-select" id="bot-index" multiple size="4"></select>
+        <p class="field-hint">Hold Ctrl / Cmd to select multiple databases. The bot will search all selected databases for every question.</p>
       </div>
 
-      <div class="progress-track">
-        <div class="progress-fill" id="progress-fill"></div>
+      <div class="field-block">
+        <label class="field-label" for="bot-model">Gemini model</label>
+        <select class="field-input field-select" id="bot-model">
+          <option value="gemma-4-31b-it">gemma-4-31b-it (default)</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+        </select>
       </div>
 
-      <div class="log-body" id="log-body" aria-live="polite" aria-relevant="additions">
-        <div class="log-line">
-          <span class="log-ts">--:--:--</span>
-          <span class="log-msg system">mika ingestion engine ready<span class="cursor"></span></span>
-        </div>
-        <div class="log-line">
-          <span class="log-ts">--:--:--</span>
-          <span class="log-msg system">configure a source and press RUN INGESTION</span>
-        </div>
+      <div class="field-block">
+        <label class="field-label" for="bot-prompt">System prompt <span class="field-optional">(optional)</span></label>
+        <textarea class="field-input field-textarea" id="bot-prompt"
+          placeholder="You are a helpful assistant specialized in…" rows="4"></textarea>
       </div>
 
-      <div class="stat-bar">
-        <div class="stat-cell">
-          <span class="stat-val" id="stat-chunks">—</span>
-          <span class="stat-key">CHUNKS</span>
-        </div>
-        <div class="stat-cell">
-          <span class="stat-val" id="stat-vectors">—</span>
-          <span class="stat-key">VECTORS</span>
-        </div>
-        <div class="stat-cell">
-          <span class="stat-val" id="stat-time">—</span>
-          <span class="stat-key">ELAPSED</span>
-        </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="modal-cancel-btn">Cancel</button>
+        <button class="btn-primary" id="modal-save-btn">Save bot</button>
       </div>
-    </section>
-
-  </main>
+    </div>
+  </div>
 </div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     MODAL: DB detail / sources
+══════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="db-modal" hidden>
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <span class="modal-title" id="db-modal-title">Database</span>
+      <button class="modal-close" id="db-modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="db-modal-stats" id="db-modal-stats"></div>
+      <p class="block-label" style="margin-top:20px;margin-bottom:8px;">Sources</p>
+      <div class="source-list" id="db-modal-sources"></div>
+      <div class="modal-actions" style="margin-top:24px;">
+        <button class="btn-danger" id="db-modal-delete-btn">⊘ Delete database</button>
+        <button class="btn-ghost" id="db-modal-close2">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     LOG DRAWER: Bot logs
+══════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="log-drawer" hidden>
+  <div class="modal modal-wide modal-log">
+    <div class="modal-header">
+      <span class="modal-title" id="log-drawer-title">Bot Logs</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="process-badge" id="log-process-badge">—</span>
+        <button class="log-btn" id="log-drawer-stream-btn">▶ Live</button>
+        <button class="modal-close" id="log-drawer-close">✕</button>
+      </div>
+    </div>
+    <div class="log-drawer-meta" id="log-drawer-meta"></div>
+    <div class="log-body log-drawer-body" id="log-drawer-body" style="height:420px;padding:14px 18px;"></div>
+    <div class="log-drawer-tabs">
+      <button class="log-tab active" data-src="stdout">stdout</button>
+      <button class="log-tab" data-src="stderr">stderr</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
 
 <script src="{% static 'ingestion/js/main.js' %}"></script>
 </body>
