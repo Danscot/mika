@@ -1,5 +1,15 @@
+"""
+searcher.py
+-----------
+FAISS similarity search over ingested chunks.
+
+Accepts an optional shared Embedder instance so the sentence-transformers
+model is only loaded once per bot session, not once per index.
+"""
+
 import logging
-import numpy as np
+from pathlib import Path
+
 from storage import Storage
 from embedder import Embedder
 
@@ -7,55 +17,47 @@ logger = logging.getLogger(__name__)
 
 
 class Search:
-    """
-    RAG Search class using FAISS + embedded chunks.
 
-    Uses L2 (Euclidean) distance — LOWER distance means MORE similar.
-    Threshold guide for all-MiniLM-L6-v2:
-      • Very similar:   ~0.0 – 0.5
-      • Related:        ~0.5 – 1.8
-      • Unrelated:      > 1.8
+    def __init__(self, index_path: str = "index.faiss",
+                 chunks_path: str = "chunks.pkl",
+                 embedder: Embedder | None = None,
+                 threshold: float = 1.8):
+        """
+        embedder  – pass a shared Embedder to avoid loading the model twice.
+                    If None, a new Embedder is created (standalone usage).
+        threshold – maximum L2 distance to accept a chunk as relevant.
+                    For all-MiniLM-L6-v2: ~0-0.5 very similar, ~0.5-1.8 related.
+        """
+        storage          = Storage()
+        self.index       = storage.load_index(index_path)
+        self.chunks      = self._normalize(storage.load_chunks(chunks_path))
+        self.embedder    = embedder or Embedder()
+        self.threshold   = threshold
 
-    Chunks can be stored as plain strings (legacy) or dicts {"text":..., "source":...}.
-    Both formats are handled transparently.
-    """
-
-    def __init__(self, index_path="index.faiss", chunks_path="chunks.pkl", threshold=1.8):
-        self.storage   = Storage()
-        self.index     = self.storage.load_index(index_path)
-        self.chunks    = self._normalize_chunks(self.storage.load_chunks(chunks_path))
-        self.embedder  = Embedder()
-        self.threshold = threshold
-
-    # ── internal helpers ──────────────────────────────────────────────────────
+    # ── Normalisation ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _normalize_chunks(chunks: list) -> list[dict]:
-        """
-        Normalize any mix of bare strings and dicts into uniform dicts.
-        This handles indexes built before the dict-chunk migration.
-        """
-        normalized = []
+    def _normalize(chunks: list) -> list[dict]:
+        """Coerce old bare-string chunks to {"text": ..., "source": ""} dicts."""
+        out = []
         for c in chunks:
             if isinstance(c, dict) and "text" in c:
-                normalized.append(c)
+                out.append(c)
             else:
-                normalized.append({"text": str(c), "source": ""})
-        return normalized
+                out.append({"text": str(c), "source": ""})
+        return out
 
-    # ── public API ────────────────────────────────────────────────────────────
+    # ── Query ─────────────────────────────────────────────────────────────────
 
     def query(self, question: str, top_k: int = 5) -> str:
         """
-        Search the FAISS index for the top_k most relevant chunks.
-        Returns a joined string of sufficiently similar chunks,
-        or an empty string when nothing passes the threshold.
+        Embed the question, search FAISS, return joined chunk texts.
+        Returns an empty string if nothing passes the threshold.
         """
-        query_vec = self.embedder.embedder.encode(
+        vec = self.embedder.embedder.encode(
             [question], convert_to_numpy=True
         )
-
-        distances, indices = self.index.search(query_vec, top_k)
+        distances, indices = self.index.search(vec, top_k)
 
         logger.debug(
             "RAG distances for %r: %s",
@@ -71,12 +73,11 @@ class Search:
                 results.append(self.chunks[i]["text"])
 
         if not results:
-            best = float(distances[0][0]) if len(distances[0]) else -1
             logger.warning(
-                "RAG: 0 chunks matched for %r  "
-                "(best L2=%.3f, threshold=%.3f). "
-                "Tip: raise threshold or re-ingest.",
-                question, best, self.threshold,
+                "RAG: 0 chunks matched for %r (best L2=%.3f, threshold=%.3f)",
+                question,
+                float(distances[0][0]) if len(distances[0]) else -1,
+                self.threshold,
             )
 
         return "\n\n".join(results)

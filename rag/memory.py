@@ -1,103 +1,84 @@
-'''
-Just implementing a user memory to recall conversation by storing everything in a faiss format hehehe math vect shith
-'''
+"""
+memory.py
+---------
+Lightweight conversation memory using a simple sliding window.
+
+WHY NOT FAISS FOR MEMORY:
+  The old implementation embedded every Q+A pair into a FAISS index,
+  wrote it to disk after every message, and ran a vector search to
+  retrieve "relevant" past turns. For 5-50 messages per user this is
+  massive overkill:
+    - Loads sentence-transformers twice (once in Memory, once in Search)
+    - Blocks on disk I/O (faiss.write_index + pickle.dump) after every reply
+    - Vector similarity on 10 conversation turns is not meaningfully better
+      than just keeping the last N turns — recent context IS the relevant context
+
+WHAT WE DO INSTEAD:
+  Keep the last MAX_TURNS Q+A pairs in a plain Python list (in memory).
+  Optionally persist to a tiny JSON file so memory survives bot restarts.
+  Zero embedding, zero FAISS, zero disk I/O on the hot path.
+"""
+
+import json
+import logging
 import os
+from collections import deque
+from pathlib import Path
 
-import faiss
+logger = logging.getLogger(__name__)
 
-import numpy as np
-
-import pickle
-
-from embedder import Embedder  
+MAX_TURNS = 10          # how many Q+A pairs to keep per user
+PERSIST   = True        # save to disk so memory survives restarts
 
 
 class Memory:
 
-    def __init__(self, user_id: str, index_dir="user_indexes"):
+    def __init__(self, user_id: str, index_dir: str = "user_indexes"):
+        self.user_id   = user_id
+        self._data_dir = Path(index_dir)
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._path     = self._data_dir / f"{user_id}_memory.json"
+        self._turns: deque[dict] = deque(maxlen=MAX_TURNS)
 
-        self.user_id = user_id
+        # Load persisted memory if it exists
+        if PERSIST and self._path.exists():
+            try:
+                with open(self._path) as f:
+                    saved = json.load(f)
+                for turn in saved[-MAX_TURNS:]:
+                    self._turns.append(turn)
+                logger.debug("Loaded %d turns for user %s", len(self._turns), user_id)
+            except Exception as e:
+                logger.warning("Could not load memory for %s: %s", user_id, e)
 
-        self.index_dir = index_dir
-
-        os.makedirs(self.index_dir, exist_ok=True)
-
-        # File path for this user's FAISS index and mapping
-        self.index_path = os.path.join(self.index_dir, f"{self.user_id}_index.faiss")
-
-        self.data_path = os.path.join(self.index_dir, f"{self.user_id}_data.pkl")
-
-        # Initialize embedder
-        self.embedder = Embedder()
-
-        # Load or create FAISS index
-        if os.path.exists(self.index_path) and os.path.exists(self.data_path):
-
-            self.index = faiss.read_index(self.index_path)
-
-            with open(self.data_path, "rb") as f:
-
-                self.data = pickle.load(f)
-
-        else:
-
-            self.index = None
-
-            self.data = []  # store list of {"question": ..., "answer": ...}
+    # ── public API (same interface as the old Memory) ─────────────────────────
 
     def add_conversation(self, question: str, answer: str):
+        """Append a Q+A turn. O(1), no embedding, no FAISS."""
+        self._turns.append({"question": question, "answer": answer})
+        if PERSIST:
+            self._save()
 
+    def query(self, query_text: str = "", top_k: int = 5) -> list[dict]:
         """
-        Store a conversation: question + answer
+        Return the most recent min(top_k, MAX_TURNS) turns.
+        query_text is accepted for interface compatibility but ignored —
+        recency is a better signal than similarity for conversation context.
         """
+        turns = list(self._turns)
+        return turns[-top_k:]
 
-        # Embed the combined conversation
+    def clear(self, user_id: str | None = None):
+        """Clear memory for this user."""
+        self._turns.clear()
+        if PERSIST and self._path.exists():
+            self._path.unlink(missing_ok=True)
 
-        text = f"Q: {question}\nA: {answer}"
+    # ── internal ──────────────────────────────────────────────────────────────
 
-        embedding = self.embedder.embed([text])  # returns numpy array
-
-        if self.index is None:
-
-            dim = embedding.shape[1]
-
-            self.index = faiss.IndexFlatL2(dim)
-
-        # Add to FAISS index
-
-        self.index.add(embedding)
-
-        self.data.append({"question": question, "answer": answer})
-
-        # Save index + data
-
-        faiss.write_index(self.index, self.index_path)
-
-        with open(self.data_path, "wb") as f:
-
-            pickle.dump(self.data, f)
-
-    def query(self, query_text: str, top_k: int = 5):
-
-        """
-        Retrieve top_k relevant conversations for a query
-
-        """
-
-        if self.index is None or len(self.data) == 0:
-
-            return []
-
-        query_emb = self.embedder.embed([query_text])
-
-        distances, indices = self.index.search(query_emb, top_k)
-
-        results = []
-
-        for idx in indices[0]:
-
-            if idx < len(self.data):
-            	
-                results.append(self.data[idx])
-
-        return results
+    def _save(self):
+        try:
+            with open(self._path, "w") as f:
+                json.dump(list(self._turns), f)
+        except Exception as e:
+            logger.warning("Could not persist memory for %s: %s", self.user_id, e)
