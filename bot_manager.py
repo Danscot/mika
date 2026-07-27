@@ -46,9 +46,30 @@ SUPERVISOR_DIR = Path("/etc/supervisor/conf.d")
 LOG_DIR        = Path("/var/log/mika")
 ENV_FILE       = BASE_DIR / ".env"
 
-_index_dir = os.environ.get("INDEX_DIR", str(BASE_DIR / "indexes"))
-BOTS_JSON  = Path(_index_dir).parent / "bots.json"
-PIDS_FILE  = Path(_index_dir).parent / "pids.json"     # dev mode only
+def _index_dir() -> Path:
+    """
+    Resolve INDEX_DIR at call time, not import time.
+    When called from Django, settings are already loaded and take precedence.
+    Falls back to env var, then to <project>/indexes.
+    """
+    try:
+        from django.conf import settings
+        return Path(settings.INDEX_DIR)
+    except Exception:
+        return Path(os.environ.get("INDEX_DIR", str(BASE_DIR / "indexes")))
+
+
+def _bots_json() -> Path:
+    return _index_dir().parent / "bots.json"
+
+
+def _pids_file() -> Path:
+    return _index_dir().parent / "pids.json"
+
+
+# Keep module-level names for CLI usage (resolved once at import for CLI only)
+BOTS_JSON = BASE_DIR / "bots.json"   # overridden at runtime via _bots_json()
+PIDS_FILE = BASE_DIR / "pids.json"   # overridden at runtime via _pids_file()
 
 
 # ── Environment detection ─────────────────────────────────────────────────────
@@ -68,23 +89,30 @@ def _prog_name(bot_id: str) -> str:
 # ── bots.json helpers ─────────────────────────────────────────────────────────
 
 def load_bots() -> list[dict]:
-    if not BOTS_JSON.exists():
+    path = _bots_json()
+    if not path.exists():
         return []
-    with open(BOTS_JSON) as f:
+    with open(path) as f:
         return json.load(f)
 
 
 # ── Dev mode: PID file ────────────────────────────────────────────────────────
 
 def _load_pids() -> dict:
-    if PIDS_FILE.exists():
-        with open(PIDS_FILE) as f:
-            return json.load(f)
+    path = _pids_file()
+    if path.exists():
+        with open(path) as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
     return {}
 
 
 def _save_pids(pids: dict):
-    with open(PIDS_FILE, "w") as f:
+    path = _pids_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
         json.dump(pids, f, indent=2)
 
 
@@ -98,8 +126,8 @@ def _is_running(pid: int) -> bool:
 
 
 def _dev_log_path(bot_id: str) -> Path:
-    log_dir = BASE_DIR / "logs"
-    log_dir.mkdir(exist_ok=True)
+    log_dir = _index_dir().parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / f"bot-{bot_id}.log"
 
 
@@ -108,7 +136,8 @@ def dev_start(bot_id: str) -> int | None:
     log_path = _dev_log_path(bot_id)
     log_file = open(log_path, "a")
 
-    # Load .env into the subprocess environment
+    # Build environment: start from current process (Django already loaded .env),
+    # then overlay the .env file for any vars that weren't exported.
     env = os.environ.copy()
     if ENV_FILE.exists():
         with open(ENV_FILE) as f:
@@ -116,7 +145,27 @@ def dev_start(bot_id: str) -> int | None:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip().strip('"').strip("'")
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    # Only set if not already present (os.environ wins)
+                    env.setdefault(k, v)
+
+    # Ensure critical vars are always present
+    must_have = ["GEMINI_API_KEY", "DJANGO_SETTINGS_MODULE", "INDEX_DIR"]
+    missing = [k for k in must_have if not env.get(k)]
+    if missing:
+        logger.error(
+            "Cannot start bot %s — missing env vars: %s. "
+            "Check your .env file or export them before starting Django.",
+            bot_id, missing,
+        )
+        return None
+
+    # Always tell bot_runner where the indexes live
+    env["INDEX_DIR"] = str(_index_dir())
+    env["DJANGO_SETTINGS_MODULE"] = env.get(
+        "DJANGO_SETTINGS_MODULE", "mika_project.settings"
+    )
 
     proc = subprocess.Popen(
         [_python(), str(BASE_DIR / "bot_runner.py"), "--bot-id", bot_id],
@@ -124,14 +173,28 @@ def dev_start(bot_id: str) -> int | None:
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
-        start_new_session=True,   # detach from parent — survives terminal close
+        start_new_session=True,   # detach — survives terminal / gunicorn restart
     )
+
+    # Give the process 1 second to fail fast (bad token, missing index, etc.)
+    import time
+    time.sleep(1.0)
+    if proc.poll() is not None:
+        logger.error(
+            "Bot %s (PID %d) exited immediately (code %d). "
+            "Check the log: %s",
+            bot_id, proc.pid, proc.returncode, log_path,
+        )
+        return None
 
     pids = _load_pids()
     pids[bot_id] = proc.pid
     _save_pids(pids)
 
-    logger.info("Started bot %s as PID %d (log: %s)", bot_id, proc.pid, log_path)
+    logger.info(
+        "Started bot %s as PID %d  log=%s",
+        bot_id, proc.pid, log_path,
+    )
     return proc.pid
 
 

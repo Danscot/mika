@@ -326,21 +326,59 @@ def api_bot_create(request):
     return JsonResponse({"bot": bot}, status=201)
 
 
-def _sync_bots_async():
-    """Call bot_manager.py --sync in a background thread so the API returns fast."""
-    import subprocess, sys, threading
+def _bot_manager():
+    """Import bot_manager from the project root, with correct sys.path."""
+    import sys as _sys
+    root = str(_Path(__file__).parent.parent)
+    if root not in _sys.path:
+        _sys.path.insert(0, root)
+    import importlib, bot_manager as _bm
+    # Re-import so PIDS_FILE always resolves from the current INDEX_DIR setting
+    importlib.reload(_bm)
+    return _bm
+
+
+def _apply_bot_action(bot_id: str, desired_status: str):
+    """
+    Start or stop a single bot in a background thread.
+    Runs in-process (no subprocess) so Django's env vars are available,
+    paths resolve correctly, and errors are logged rather than swallowed.
+    """
+    import threading, logging as _log
+    logger = _log.getLogger(__name__)
+
     def _run():
         try:
-            subprocess.run(
-                [sys.executable, "bot_manager.py", "--sync"],
-                cwd=_Path(__file__).parent.parent,
-                timeout=30,
-                capture_output=True,
+            bm  = _bot_manager()
+            bot = next((b for b in _load_bots() if b["id"] == bot_id), None)
+            if bot is None:
+                logger.error("_apply_bot_action: bot %s not found", bot_id)
+                return
+
+            current = bm.get_status(bot_id)["sv_status"]
+            logger.info(
+                "Bot %s: desired=%s current=%s",
+                bot_id, desired_status, current,
             )
+
+            if desired_status == "running" and current != "RUNNING":
+                logger.info("Starting bot %s (%s)", bot["name"], bot_id)
+                bm.start_bot(bot)
+            elif desired_status != "running" and current == "RUNNING":
+                logger.info("Stopping bot %s (%s)", bot["name"], bot_id)
+                bm.stop_bot(bot_id)
+            else:
+                logger.info(
+                    "Bot %s already in desired state (%s) — no action",
+                    bot_id, current,
+                )
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("bot_manager sync failed: %s", exc)
-    threading.Thread(target=_run, daemon=True).start()
+            import logging as _l
+            _l.getLogger(__name__).exception(
+                "Failed to %s bot %s: %s", desired_status, bot_id, exc
+            )
+
+    threading.Thread(target=_run, daemon=True, name=f"bot-{bot_id}-{desired_status}").start()
 
 
 @csrf_exempt
@@ -366,9 +404,9 @@ def api_bot_update(request, bot_id: str):
             elif "index_name" in body:
                 bot["index_names"] = [body["index_name"]]
             _save_bots(bots)
-            # If status toggled, sync processes in background
+            # If status toggled, start/stop the process in background
             if status_changed:
-                _sync_bots_async()
+                _apply_bot_action(bot_id, bot.get("status", "stopped"))
             return JsonResponse({"bot": bot})
 
     return JsonResponse({"error": "Bot not found."}, status=404)
