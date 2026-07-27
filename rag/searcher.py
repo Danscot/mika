@@ -1,44 +1,54 @@
 """
 searcher.py
 -----------
-FAISS similarity search over ingested chunks.
+Two-stage retrieval:
+  1. FAISS bi-encoder retrieval  — fast, fetches top-K candidates (default 20)
+  2. Cross-encoder reranking     — precise, keeps top-N (default 5)
 
-Accepts an optional shared Embedder instance so the sentence-transformers
-model is only loaded once per bot session, not once per index.
+Accepts a shared Embedder so the sentence-transformers model is only
+loaded once per bot session, and an optional shared Reranker.
 """
 
 import logging
 from pathlib import Path
 
-from storage import Storage
+from storage  import Storage
 from embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
+# Stage-1: fetch more candidates than we'll return, to give the reranker options
+FETCH_K    = 20
+# Stage-2: keep this many after reranking
+RETURN_K   = 5
+# L2 distance ceiling — chunks beyond this are dropped before reranking
+THRESHOLD  = 1.8
+
 
 class Search:
 
-    def __init__(self, index_path: str = "index.faiss",
+    def __init__(self,
+                 index_path:  str = "index.faiss",
                  chunks_path: str = "chunks.pkl",
-                 embedder: Embedder | None = None,
-                 threshold: float = 1.8):
+                 embedder:    Embedder | None = None,
+                 reranker=None,
+                 threshold:   float = THRESHOLD):
         """
-        embedder  – pass a shared Embedder to avoid loading the model twice.
-                    If None, a new Embedder is created (standalone usage).
-        threshold – maximum L2 distance to accept a chunk as relevant.
-                    For all-MiniLM-L6-v2: ~0-0.5 very similar, ~0.5-1.8 related.
+        embedder  — shared Embedder instance (or None → create own)
+        reranker  — shared Reranker instance (or None → skip reranking)
+        threshold — max L2 distance for stage-1 candidates
         """
-        storage          = Storage()
-        self.index       = storage.load_index(index_path)
-        self.chunks      = self._normalize(storage.load_chunks(chunks_path))
-        self.embedder    = embedder or Embedder()
-        self.threshold   = threshold
+        storage       = Storage()
+        self.index    = storage.load_index(index_path)
+        self.chunks   = self._normalize(storage.load_chunks(chunks_path))
+        self.embedder = embedder or Embedder()
+        self.reranker = reranker
+        self.threshold = threshold
 
-    # ── Normalisation ─────────────────────────────────────────────────────────
+    # ── normalisation ─────────────────────────────────────────────────────────
 
     @staticmethod
     def _normalize(chunks: list) -> list[dict]:
-        """Coerce old bare-string chunks to {"text": ..., "source": ""} dicts."""
         out = []
         for c in chunks:
             if isinstance(c, dict) and "text" in c:
@@ -47,37 +57,46 @@ class Search:
                 out.append({"text": str(c), "source": ""})
         return out
 
-    # ── Query ─────────────────────────────────────────────────────────────────
+    # ── query ─────────────────────────────────────────────────────────────────
 
-    def query(self, question: str, top_k: int = 5) -> str:
+    def query(self, question: str, top_k: int = RETURN_K) -> str:
         """
-        Embed the question, search FAISS, return joined chunk texts.
-        Returns an empty string if nothing passes the threshold.
+        Stage 1 — FAISS retrieval (fast, broad)
+        Stage 2 — Cross-encoder reranking (precise, narrow)
+        Returns joined text of the top chunks.
         """
+        # ── Stage 1: FAISS ────────────────────────────────────────────────────
         vec = self.embedder.embedder.encode(
             [question], convert_to_numpy=True
         )
-        distances, indices = self.index.search(vec, top_k)
+        fetch_k = max(FETCH_K, top_k * 4)
+        distances, indices = self.index.search(vec, fetch_k)
 
-        logger.debug(
-            "RAG distances for %r: %s",
-            question,
-            [(round(float(d), 3), int(i)) for d, i in zip(distances[0], indices[0])],
-        )
-
-        results = []
+        candidates = []
         for dist, i in zip(distances[0], indices[0]):
             if i == -1:
                 continue
             if dist <= self.threshold:
-                results.append(self.chunks[i]["text"])
+                candidates.append(self.chunks[i]["text"])
 
-        if not results:
+        logger.debug(
+            "FAISS: fetched %d candidates for %r (best L2=%.3f)",
+            len(candidates), question,
+            float(distances[0][0]) if len(distances[0]) else -1,
+        )
+
+        if not candidates:
             logger.warning(
-                "RAG: 0 chunks matched for %r (best L2=%.3f, threshold=%.3f)",
-                question,
+                "RAG: 0 candidates passed threshold (best L2=%.3f, threshold=%.3f) for %r",
                 float(distances[0][0]) if len(distances[0]) else -1,
-                self.threshold,
+                self.threshold, question,
             )
+            return ""
 
-        return "\n\n".join(results)
+        # ── Stage 2: reranking (if reranker available) ────────────────────────
+        if self.reranker and len(candidates) > top_k:
+            ranked = self.reranker.rerank(question, candidates, top_n=top_k)
+        else:
+            ranked = candidates[:top_k]
+
+        return "\n\n".join(ranked)

@@ -4,6 +4,8 @@ python-dotenv
 
 # ── RAG dependencies ──────────────────────────────────────────────────────────
 sentence-transformers
+nltk                  # sentence-aware chunking
+cross-encoder         # reranking (ms-marco-MiniLM-L-6-v2)
 faiss-cpu
 firecrawl-py
 gitpython

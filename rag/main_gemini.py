@@ -1,14 +1,16 @@
 """
 main_gemini.py
 --------------
-Orchestrates RAG search + memory + Gemini brain.
+Orchestrates the full RAG pipeline:
+  Embedder (shared) → FAISS retrieval → Cross-encoder reranking
+  → Gemini with structured message history → Memory (sliding window)
 
-Performance improvements over v1:
-  - Single Embedder instance shared across all Search objects in a session
-    (avoids loading the 90MB sentence-transformers model multiple times)
-  - RAG search and memory lookup run concurrently via ThreadPoolExecutor
-  - Memory is a lightweight sliding window (no FAISS, no disk I/O on hot path)
-  - Index hot-reload via mtime check — no restart needed after ingestion
+Changes from previous version:
+  1. Reranker loaded once and shared across all Search instances
+  2. Conversation history passed to Gemini as structured turns (not flat string)
+     so "tell me more" / "what about the second point" work correctly
+  3. System prompt injected via system_instruction (not mixed into user turn)
+  4. RAG context injected into the user message, keeping it separate from history
 """
 
 import json
@@ -37,18 +39,13 @@ def _resolve_rag_dir() -> Path:
 
 
 def _resolve_memory_dir() -> Path:
-    """Memory JSON files live next to the indexes."""
     return _resolve_index_dir().parent / "user_indexes"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MultiSearch:
-    """
-    Queries multiple Search instances in parallel and merges results.
-    Each searcher already uses the shared embedder so there is no
-    redundant model loading.
-    """
+    """Queries multiple Search instances in parallel and merges results."""
 
     def __init__(self, searchers: list):
         self.searchers = searchers
@@ -75,15 +72,13 @@ class MainGemini:
                  index_name:  str | None = None,
                  index_names: list[str] | None = None,
                  system_prompt_override: str | None = None):
-        """
-        index_names  – list of index names to search (preferred)
-        index_name   – single index name (legacy alias)
-        """
+
         rag_dir = str(_resolve_rag_dir())
         if rag_dir not in sys.path:
             sys.path.insert(0, rag_dir)
 
         from embedder     import Embedder
+        from reranker     import Reranker
         from searcher     import Search
         from memory       import Memory
         from brain_gemini import BrainGemini
@@ -98,7 +93,6 @@ class MainGemini:
         else:
             self._index_names = ["default"]
 
-        # Validate
         for name in self._index_names:
             p = index_dir / f"{name}.faiss"
             if not p.exists():
@@ -107,13 +101,16 @@ class MainGemini:
                     "Ingest some data first via the web UI."
                 )
 
-        # ── Single shared embedder ─────────────────────────────────────────
-        # All Search objects in this session use the same Embedder instance,
-        # so the sentence-transformers model is only loaded once into RAM.
-        self._embedder = Embedder()
         self._index_dir = index_dir
 
-        # Primary index for mtime tracking (hot-reload)
+        # ── Shared heavy objects (loaded once per session) ─────────────────
+        logger.info("Loading embedder…")
+        self._embedder = Embedder()
+
+        logger.info("Loading reranker…")
+        self._reranker = Reranker()
+
+        # Primary index for mtime hot-reload tracking
         self._primary_faiss = str(index_dir / f"{self._index_names[0]}.faiss")
         self._rag_mtime: float = 0.0
         self._rag = None
@@ -126,7 +123,7 @@ class MainGemini:
         )
         self.brain = BrainGemini()
 
-        # Persona
+        # Persona / system prompt
         if system_prompt_override:
             self.persona = system_prompt_override
         else:
@@ -142,19 +139,20 @@ class MainGemini:
     def _load_rag(self):
         from searcher import Search
 
-        def _make_search(name: str) -> Search:
+        def _make(name: str) -> Search:
             return Search(
                 index_path=str(self._index_dir / f"{name}.faiss"),
                 chunks_path=str(self._index_dir / f"{name}.pkl"),
-                embedder=self._embedder,   # ← shared instance
+                embedder=self._embedder,
+                reranker=self._reranker,
             )
 
         if len(self._index_names) == 1:
             logger.info("Loading RAG index: %s", self._index_names[0])
-            self._rag = _make_search(self._index_names[0])
+            self._rag = _make(self._index_names[0])
         else:
             logger.info("Loading %d RAG indexes: %s", len(self._index_names), self._index_names)
-            self._rag = MultiSearch([_make_search(n) for n in self._index_names])
+            self._rag = MultiSearch([_make(n) for n in self._index_names])
 
         self._rag_mtime = Path(self._primary_faiss).stat().st_mtime
 
@@ -176,42 +174,47 @@ class MainGemini:
     def query(self, question: str) -> dict:
         """
         Pipeline:
-          1. RAG search + memory lookup run concurrently
-          2. Build prompt
-          3. Call Gemini
-          4. Persist Q+A to memory (non-blocking write)
+          1. RAG retrieval + reranking (concurrent with memory lookup)
+          2. Build user message with RAG context injected
+          3. Pass conversation history as structured turns to Gemini
+          4. Persist Q+A turn to sliding-window memory
         """
-        rag   = self.rag   # resolve once (may hot-reload)
+        rag = self.rag
 
-        # Run RAG search and memory lookup at the same time
+        # Run RAG and memory lookup concurrently
         with ThreadPoolExecutor(max_workers=2) as pool:
             rag_fut    = pool.submit(rag.query,         question)
             memory_fut = pool.submit(self.memory.query, question)
-
             context    = rag_fut.result()
             past_turns = memory_fut.result()
 
-        # Format memory as a short conversation transcript
-        memory_str = "".join(
-            f"User: {t['question']}\nAssistant: {t['answer']}\n"
-            for t in past_turns
+        # Build the user message: question + RAG context injected inline.
+        # The context is part of the user message, NOT the system prompt,
+        # so the model treats it as provided evidence rather than instructions.
+        if context:
+            user_message = (
+                f"{question}\n\n"
+                f"[Relevant knowledge base context]\n{context}"
+            )
+        else:
+            user_message = question
+
+        # Convert sliding-window turns into Gemini message format:
+        #   {"role": "user"|"model", "text": str}
+        # This lets the model reference its own earlier answers directly.
+        history = []
+        for turn in past_turns:
+            history.append({"role": "user",  "text": turn["question"]})
+            history.append({"role": "model", "text": turn["answer"]})
+
+        # Call Gemini with structured history + system prompt
+        answer = self.brain.ask(
+            prompt=user_message,
+            history=history,
+            system_prompt=self.persona or None,
         )
 
-        prompt = f"""\
-{self.persona}
-
-### Knowledge base context
-{context or "No relevant context found."}
-
-### Recent conversation
-{memory_str or "No prior conversation."}
-
-### User message
-{question}""".strip()
-
-        answer = self.brain.ask(prompt)
-
-        # Persist to memory — the sliding window write is fast (JSON, no embedding)
+        # Persist Q+A to memory (fast JSON write, no embedding)
         self.memory.add_conversation(question, answer.get("text", ""))
 
         return answer

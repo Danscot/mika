@@ -1,15 +1,1 @@
-[
-  {
-    "id": "bfed8c35",
-    "name": "mika",
-    "token": "8398340834:AAHdL0e76S86St0rl3R8jXCnqdWA5s_LNps",
-    "index_names": [
-      "default"
-    ],
-    "model": "gemma-4-31b-it",
-    "system_prompt": "you are an AI assistant that's there to pitch kanzai to people and potential clients, always be affective and convenient inorder to unboard them",
-    "status": "running",
-    "created_at": 1785024509.9688919,
-    "messages_total": 0
-  }
-]
+[]
